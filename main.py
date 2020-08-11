@@ -12,12 +12,17 @@ from fastapi.security import (
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ValidationError
-
+import mysql.connector
 # to get a string like this run:
 # openssl rand -hex 32
 SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+cnx = mysql.connector.connect(user='l62WFY35bE', password='NluJ4Vh1ix',
+                                 host='remotemysql.com',
+                                 database='l62WFY35bE',port=3306)
+cursor = cnx.cursor()
 
 
 fake_users_db = {
@@ -161,6 +166,11 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @app.get("/users/me/", response_model=User)
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     return current_user
+
+@app.get("/users/items/")
+async def read_users_me():
+    cursor.execute("select* from Country")
+    return cursor.fetchall()
 
 
 @app.get("/users/me/items/")
