@@ -2,13 +2,17 @@
 
 from datetime import datetime, timedelta
 from typing import List, Optional
-
+import random
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 from fastapi.security import (
     OAuth2PasswordBearer,
     OAuth2PasswordRequestForm,
     SecurityScopes,
 )
+import json
+import string
+import requests
+import re
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ValidationError
@@ -18,13 +22,26 @@ import mysql.connector
 SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+regex = '^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w{2,3}$'
 
 cnx = mysql.connector.connect(user='sql12359904', password='Uz363CqZFF',
                                  host='sql12.freemysqlhosting.net',
                                  database='sql12359904',port=3306)
 cursor = cnx.cursor()
 
-
+def slack_hooking(payload:str):
+    slack_url="https://hooks.slack.com/services/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"
+    slack_headers = {
+                                'accept': "application/x-www-form-urlencoded",
+                                'cache-control': "no-cache"
+                            }
+    slack_payload={"text": payload}
+    response_slack=requests.post( slack_url, data=json.dumps(slack_payload),headers={'Content-Type': 'application/json'})
+def check_email(email):  
+  
+    if(re.search(regex,email)):  
+        return True  
+    return False
 def get_user_db(username:str):
     cursor.execute("select *from user where email='"+username+"'")
 
@@ -32,13 +49,21 @@ def get_user_db(username:str):
     
     if myresult is None:
         return None
-    return{
+    user={
         "username": myresult[1],
         "hashed_password": myresult[2],
-        "disabled": False,
+        "disabled": myresult[4],
         "role":myresult[3]
         }
 
+    return user
+
+
+def random_password(length):
+    letters = string.ascii_lowercase
+    result_str = ''.join(random.choice(letters) for i in range(length))
+    return result_str
+    
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -51,7 +76,7 @@ class TokenData(BaseModel):
 
 class User(BaseModel):
     username: str
-    disabled: Optional[bool] = None
+    disabled: str
 
 
 class UserInDB(User):
@@ -74,6 +99,16 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
+def create_new_user(username:str,hashed_password:str,role:str,create_date:str):
+    cursor.execute("insert into user (email, password,role,create_date,disable) values ('"+username+"','"+hashed_password+"','"+role+"','"+create_date+"',0); ")
+    cnx.commit()
+
+def check_user_db(username:str):
+    cursor.execute("select * from user where email='"+username+"'")
+    results=cursor.fetchone()
+    if results is None:
+        return False
+    return True
 def authenticate_user(username: str, password: str):
     user = get_user_db(username)
     if user is None:
@@ -129,50 +164,128 @@ async def get_current_user(
 
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
-    if current_user["disabled"]:
+    if current_user["disabled"]=='1':
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 
-@app.post("/token", response_model=Token)
+@app.post("/login/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    new=get_user_db(form_data.username)
-    if new is None:
+    user=get_user_db(form_data.username)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect username ",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not verify_password(form_data.password, new["hashed_password"]):
+    if not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect  password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token =create_access_token(
-        data={"sub": new["username"]}, expires_delta=access_token_expires
+        data={"sub": user["username"],"role":user["role"]}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@app.get("/users/admin/", response_model=User)
-async def read_users_me(current_user: User = Depends(get_current_active_user)):
-    print(current_user)
-    return current_user
+@app.get("/admin/")
+async def admin_page(token:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="admin":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return{"message:":"Access admin page success"}
 
-@app.get("/users/items/")
-async def read_users_me():
-    cursor.execute("select* from Country")
-    return cursor.fetchall()
+@app.get("/executor/")
+async def admin_page(token:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="executor":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return{"message:":"Access executor page success"}
+    
+@app.get("/manager/")
+async def admin_page(token:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="admin":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return{"message:":"Access manager page success"}
 
-
-@app.get("/users/me/items/")
-async def read_own_items(
-    current_user: User = Security(get_current_active_user, scopes=["items"])
-):
-    return [{"item_id": "Foo", "owner": current_user.username}]
+@app.post("/admin/new-account/")
+async def create_new_account(token:str,email:str,role:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        roles: str = payload.get("role")
+        if roles!="admin":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        if check_email(email)==False:
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email value"
+            )
+        if check_user_db(email)==True:
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email, email already exist "
+        )
+        if role!="executor" and role!="manager":
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Role must be executor or manager"
+            )
+        password=random_password(8)
+        new_hashed_password=get_password_hash(password)
+        slack_hooking("username:"+email+",password:"+password)
+        create_new_user(email,new_hashed_password,role,datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return {"message":"create success"}
 
 
 @app.get("/status/")
