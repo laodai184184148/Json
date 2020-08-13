@@ -77,11 +77,19 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
-
+class Token_body(BaseModel):
+    access_token: str
 class TokenData(BaseModel):
     username: Optional[str] = None
     scopes: List[str] = []
 
+class User_Account(BaseModel):
+    username: str
+    password: str
+
+class NewUser(BaseModel):
+    username: str
+    role: str
 
 class User(BaseModel):
     username: str
@@ -178,15 +186,11 @@ async def get_current_user(
     return user
 
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)):
-    if current_user["disabled"]=='1':
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
 
 
 @app.post("/login/token", response_model=Token)
-async def login_for_access_token(username:str,password:str):
-    user=get_user_db(username)
+async def login_for_access_token(User_Account : User_Account):
+    user=get_user_db(User_Account.username)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -194,7 +198,7 @@ async def login_for_access_token(username:str,password:str):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not verify_password(password, user["hashed_password"]):
+    if not verify_password(User_Account.password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect  password",
@@ -264,7 +268,7 @@ async def manager_page(token:str):
     return{"message:":"Access manager page success"}
 
 @app.post("/admin/new-account/")
-async def create_new_account(token:str,email:str,role:str):
+async def create_new_account(token:str,New_User:NewUser):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         roles: str = payload.get("role")
@@ -274,12 +278,12 @@ async def create_new_account(token:str,email:str,role:str):
             detail="Unauthorized ",
             headers={"WWW-Authenticate": "Bearer"},
         )
-        if check_email(email)==False:
+        if check_email(New_User.email)==False:
             raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid email value"
             )
-        if check_user_db(email)==True:
+        if check_user_db(New_User.email)==True:
             raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid email, email already exist "
@@ -291,8 +295,8 @@ async def create_new_account(token:str,email:str,role:str):
             )
         password=random_password(8)
         new_hashed_password=get_password_hash(password)
-        slack_hooking("username:"+email+",password:"+password)
-        create_new_user(email,new_hashed_password,role,datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
+        slack_hooking("username:"+New_User.email+",password:"+password)
+        create_new_user(New_User.email,new_hashed_password,New_User.role,datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
     except (JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -304,3 +308,4 @@ async def create_new_account(token:str,email:str,role:str):
 @app.get("/status/")
 async def read_system_status(current_user: User = Depends(get_current_user)):
     return {"status": "ok"}
+
