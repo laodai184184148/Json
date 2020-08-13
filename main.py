@@ -253,7 +253,7 @@ async def manager_page(token:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         role: str = payload.get("role")
-        if role!="admin":
+        if role!="manager":
             raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized ",
