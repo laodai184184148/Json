@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import random
 from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi.responses import JSONResponse
 from fastapi.security import (
     OAuth2PasswordBearer,
     OAuth2PasswordRequestForm,
@@ -17,6 +18,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ValidationError
 import mysql.connector
+from fastapi.middleware.cors import CORSMiddleware
 # to get a string like this run:
 # openssl rand -hex 32
 SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
@@ -29,6 +31,20 @@ cnx = mysql.connector.connect(user='sql12359904', password='Uz363CqZFF',
                                  database='sql12359904',port=3306)
 cursor = cnx.cursor()
 
+origins = [
+    "https://tesstapidai.herokuapp.com/",
+    "http://localhost",
+    "http://localhost:8080",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 def slack_hooking(payload:str):
     slack_url="https://hooks.slack.com/services/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"
     slack_headers = {
@@ -37,6 +53,7 @@ def slack_hooking(payload:str):
                             }
     slack_payload={"text": payload}
     response_slack=requests.post( slack_url, data=json.dumps(slack_payload),headers={'Content-Type': 'application/json'})
+slack_hooking("asdasdusa")
 def check_email(email):  
   
     if(re.search(regex,email)):  
@@ -57,8 +74,6 @@ def get_user_db(username:str):
         }
 
     return user
-
-
 def random_password(length):
     letters = string.ascii_lowercase
     result_str = ''.join(random.choice(letters) for i in range(length))
@@ -170,8 +185,8 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 
 
 @app.post("/login/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user=get_user_db(form_data.username)
+async def login_for_access_token(username:str,password:str):
+    user=get_user_db(username)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -179,7 +194,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not verify_password(form_data.password, user["hashed_password"]):
+    if not verify_password(password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect  password",
@@ -189,8 +204,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     access_token =create_access_token(
         data={"sub": user["username"],"role":user["role"]}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
-
+    return JSONResponse({"access_token": access_token, "token_type": "bearer"})
 
 @app.get("/admin/")
 async def admin_page(token:str):
@@ -212,7 +226,7 @@ async def admin_page(token:str):
     return{"message:":"Access admin page success"}
 
 @app.get("/executor/")
-async def admin_page(token:str):
+async def executor_page(token:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         role: str = payload.get("role")
@@ -231,7 +245,7 @@ async def admin_page(token:str):
     return{"message:":"Access executor page success"}
     
 @app.get("/manager/")
-async def admin_page(token:str):
+async def manager_page(token:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         role: str = payload.get("role")
@@ -286,7 +300,6 @@ async def create_new_account(token:str,email:str,role:str):
             headers={"WWW-Authenticate": "Bearer"},
         )
     return {"message":"create success"}
-
 
 @app.get("/status/")
 async def read_system_status(current_user: User = Depends(get_current_user)):
