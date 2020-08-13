@@ -37,13 +37,7 @@ origins = [
     "http://localhost:8080",
 ]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 def slack_hooking(payload:str):
     slack_url="https://hooks.slack.com/services/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"
@@ -107,7 +101,13 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 app = FastAPI()
 
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
