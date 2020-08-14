@@ -35,6 +35,8 @@ origins = [
     "https://tesstapidai.herokuapp.com/",
     "http://localhost",
     "http://localhost:3000",
+    "https://demoooo-1.herokuapp.com/",
+    "https://demoooo-1.herokuapp.com/login"
 ]
 
 
@@ -47,12 +49,13 @@ def slack_hooking(payload:str):
                             }
     slack_payload={"text": payload}
     response_slack=requests.post( slack_url, data=json.dumps(slack_payload),headers={'Content-Type': 'application/json'})
-slack_hooking("asdasdusa")
+
 def check_email(email):  
   
     if(re.search(regex,email)):  
         return True  
     return False
+
 def get_user_db(username:str):
     cursor.execute("select *from user where email='"+username+"'")
 
@@ -61,13 +64,64 @@ def get_user_db(username:str):
     if myresult is None:
         return None
     user={
+        "id": myresult[0],
         "username": myresult[1],
         "hashed_password": myresult[2],
         "disabled": myresult[4],
         "role":myresult[3]
         }
-
     return user
+
+def get_country_name(country_zip:str):
+    cursor.execute("select name from Country where zip_code='"+country_zip+"'")
+    return cursor.fetchone()[0]
+
+def get_channel_id(manager_id:str):
+    cursor.execute("select id from channel where manager_id='"+str(manager_id)+"'")
+    if cursor.fetchone() is None:
+        return None
+    return cursor.fetchone()[0]
+
+def get_all_shop_admin():
+    cursor.execute("select *from shop ")
+
+    myresult = cursor.fetchall()
+    all_shop=[]
+    for shop in myresult:
+        all_shop.append({
+            "id": shop[0],
+            "name": shop[1],
+            "url": shop[2],
+            "country_zip": shop[3],
+            "sim_id": shop[4],
+            "channel_id":shop[6],
+            "executor_id":shop[5]
+        })
+    return all_shop
+
+def get_all_shop(username:str):
+    user=get_user_db(username)
+    if user["role"]=="admin":
+        cursor.execute("select *from shop ")
+    elif user["role"]=="executor":
+        cursor.execute("select *from shop where executor_id='"+str(user["id"])+"'")
+    channel_id=get_channel_id(user["id"])
+    if channel_id is None:
+        return []
+    cursor.execute("select *from shop where channel_id='"+str(channel_id)+"'")
+    myresult = cursor.fetchall()
+    all_shop=[]
+    for shop in myresult:
+        all_shop.append({
+            "id": shop[0],
+            "name": shop[1],
+            "url": shop[2],
+            "country": get_country_name(shop[3]),
+            "sim_id": shop[4],
+            "channel_id":shop[6],
+            "executor_id":shop[5]
+        })
+    return all_shop
 def random_password(length):
     letters = string.ascii_lowercase
     result_str = ''.join(random.choice(letters) for i in range(length))
@@ -79,6 +133,7 @@ class Token(BaseModel):
 
 class Token_body(BaseModel):
     access_token: str
+
 class TokenData(BaseModel):
     username: Optional[str] = None
     scopes: List[str] = []
@@ -88,17 +143,15 @@ class User_Account(BaseModel):
     password: str
 
 class NewUser(BaseModel):
-    username: str
+    email: str
     role: str
 
 class User(BaseModel):
     username: str
     disabled: str
 
-
 class UserInDB(User):
     hashed_password: str
-
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -152,9 +205,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 
-async def get_current_user(
-    security_scopes: SecurityScopes, token: str = Depends(oauth2_scheme)
-):
+async def get_current_user(security_scopes: SecurityScopes, token: str = Depends(oauth2_scheme)):
     if security_scopes.scopes:
         authenticate_value = f'Bearer scope="{security_scopes.scope_str}"'
     else:
@@ -185,10 +236,7 @@ async def get_current_user(
             )
     return user
 
-
-
-
-@app.post("/login/token", response_model=Token)
+@app.post("/login/token", response_model=Token,tags=["login"])
 async def login_for_access_token(User_Account : User_Account):
     user=get_user_db(User_Account.username)
     if user is None:
@@ -210,7 +258,7 @@ async def login_for_access_token(User_Account : User_Account):
     )
     return JSONResponse({"access_token": access_token, "token_type": "bearer"})
 
-@app.get("/admin/")
+@app.get("/admin/",tags=["admin"])
 async def admin_page(token:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -229,7 +277,27 @@ async def admin_page(token:str):
         )
     return{"message:":"Access admin page success"}
 
-@app.get("/executor/")
+@app.get("/admin/shops",tags=["admin"])
+async def get_all_shops(token:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="admin":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return JSONResponse(get_all_shop())
+
+@app.get("/executor/",tags=["executor"])
 async def executor_page(token:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -248,7 +316,7 @@ async def executor_page(token:str):
         )
     return{"message:":"Access executor page success"}
     
-@app.get("/manager/")
+@app.get("/manager/",tags=["manager"])
 async def manager_page(token:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -267,8 +335,27 @@ async def manager_page(token:str):
         )
     return{"message:":"Access manager page success"}
 
-@app.post("/admin/new-account/")
-async def create_new_account(token:str,New_User:NewUser):
+@app.get("/manager/shops",tags=["manager"])
+async def manager_page(token:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="manager":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return{"message:":"Access manager page success"}
+
+@app.post("/admin/new-account/",tags=["admin"])
+async def create_new_account(token:str,email:str,role:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         roles: str = payload.get("role")
@@ -278,12 +365,12 @@ async def create_new_account(token:str,New_User:NewUser):
             detail="Unauthorized ",
             headers={"WWW-Authenticate": "Bearer"},
         )
-        if check_email(New_User.email)==False:
+        if check_email(email)==False:
             raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid email value"
             )
-        if check_user_db(New_User.email)==True:
+        if check_user_db(email)==True:
             raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid email, email already exist "
@@ -295,8 +382,7 @@ async def create_new_account(token:str,New_User:NewUser):
             )
         password=random_password(8)
         new_hashed_password=get_password_hash(password)
-        slack_hooking("username:"+New_User.email+",password:"+password)
-        create_new_user(New_User.email,new_hashed_password,New_User.role,datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
+        create_new_user(email,new_hashed_password,role,datetime.now().strftime("%m/%d/%Y, %H:%M:%S"))
     except (JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
