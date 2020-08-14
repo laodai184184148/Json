@@ -35,7 +35,7 @@ origins = [
     "https://tesstapidai.herokuapp.com/",
     "http://localhost",
     "http://localhost:3000",
-    "https://demoooo-1.herokuapp.com/",
+    "https://demoooo-1.herokuapp.com",
     "https://demoooo-1.herokuapp.com/login"
 ]
 
