@@ -40,16 +40,6 @@ origins = [
 ]
 
 
-
-def slack_hooking(payload:str):
-    slack_url="https://hooks.slack.com/services/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"
-    slack_headers = {
-                                'accept': "application/x-www-form-urlencoded",
-                                'cache-control': "no-cache"
-                            }
-    slack_payload={"text": payload}
-    response_slack=requests.post( slack_url, data=json.dumps(slack_payload),headers={'Content-Type': 'application/json'})
-
 def check_email(email):  
   
     if(re.search(regex,email)):  
@@ -77,38 +67,30 @@ def get_country_name(country_zip:str):
     return cursor.fetchone()[0]
 
 def get_channel_id(manager_id:str):
-    cursor.execute("select id from channel where manager_id='"+str(manager_id)+"'")
-    if cursor.fetchone() is None:
-        return None
-    return cursor.fetchone()[0]
+    cursor.execute("select * from channel where manager_id='"+str(manager_id)+"'")
+    myresult=cursor.fetchone()
+    return str(myresult[0])
 
-def get_all_shop_admin():
-    cursor.execute("select *from shop ")
-
-    myresult = cursor.fetchall()
-    all_shop=[]
-    for shop in myresult:
-        all_shop.append({
-            "id": shop[0],
-            "name": shop[1],
-            "url": shop[2],
-            "country_zip": shop[3],
-            "sim_id": shop[4],
-            "channel_id":shop[6],
-            "executor_id":shop[5]
-        })
-    return all_shop
+def update_executor_db(username:str,shopID:str):
+    user=get_user_db(username)
+    cursor.execute("update shop set executor_id='"+str(user["id"])+ "' WHERE id="+shopID)
+    cnx.commit()
+    return True
 
 def get_all_shop(username:str):
+
     user=get_user_db(username)
+
     if user["role"]=="admin":
         cursor.execute("select *from shop ")
     elif user["role"]=="executor":
         cursor.execute("select *from shop where executor_id='"+str(user["id"])+"'")
-    channel_id=get_channel_id(user["id"])
-    if channel_id is None:
-        return []
-    cursor.execute("select *from shop where channel_id='"+str(channel_id)+"'")
+    elif user["role"]=="manager":
+        channel_id=get_channel_id(user["id"])
+        if channel_id is None:
+            return []
+        cursor.execute("select *from shop where channel_id='"+str(channel_id)+"'")
+
     myresult = cursor.fetchall()
     all_shop=[]
     for shop in myresult:
@@ -122,11 +104,27 @@ def get_all_shop(username:str):
             "executor_id":shop[5]
         })
     return all_shop
+
+def get_shop_details(shopID:str):
+    cursor.execute("select * from shop where id='"+str(shopID)+"'")
+    myresult=cursor.fetchone()
+    if myresult is None:
+        return None
+    return{
+            "id": myresult[0],
+            "name": myresult[1],
+            "url": myresult[2],
+            "country": get_country_name(myresult[3]),
+            "sim_id": myresult[4],
+            "channel_id":myresult[6],
+            "executor_id":myresult[5]
+
+    }
 def random_password(length):
     letters = string.ascii_lowercase
     result_str = ''.join(random.choice(letters) for i in range(length))
     return result_str
-    
+ 
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -185,6 +183,7 @@ def check_user_db(username:str):
     if results is None:
         return False
     return True
+
 def authenticate_user(username: str, password: str):
     user = get_user_db(username)
     if user is None:
@@ -192,7 +191,6 @@ def authenticate_user(username: str, password: str):
     if not verify_password(password, user["hashed_password"]):
         return False
     return user
-
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -238,24 +236,35 @@ async def get_current_user(security_scopes: SecurityScopes, token: str = Depends
 
 @app.post("/login/token", response_model=Token,tags=["login"])
 async def login_for_access_token(User_Account : User_Account):
-    user=get_user_db(User_Account.username)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username ",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    try:
+        user=get_user_db(User_Account.username)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username ",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    if not verify_password(User_Account.password, user["hashed_password"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect  password",
-            headers={"WWW-Authenticate": "Bearer"},
+        if not verify_password(User_Account.password, user["hashed_password"]):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect  password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token =create_access_token(
+            data={"sub": user["username"],
+            "role":user["role"],
+            "id":user["id"]
+            
+            }, expires_delta=access_token_expires
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token =create_access_token(
-        data={"sub": user["username"],"role":user["role"]}, expires_delta=access_token_expires
-    )
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 
     return JSONResponse({"access_token": access_token, "token_type": "bearer"})
 
 @app.get("/admin/",tags=["admin"])
@@ -295,7 +304,13 @@ async def get_all_shops(token:str):
             detail="Unauthorized ",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return JSONResponse(get_all_shop())
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 
+    return JSONResponse(get_all_shop(payload.get("sub")))
 
 @app.get("/executor/",tags=["executor"])
 async def executor_page(token:str):
@@ -333,10 +348,16 @@ async def manager_page(token:str):
             detail="Unauthorized ",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 
     return{"message:":"Access manager page success"}
 
 @app.get("/manager/shops",tags=["manager"])
-async def manager_page(token:str):
+async def manager_shops(token:str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         role: str = payload.get("role")
@@ -346,13 +367,101 @@ async def manager_page(token:str):
             detail="Unauthorized ",
             headers={"WWW-Authenticate": "Bearer"},
         )
+        shops= get_all_shop(payload.get("sub"))
     except (JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized ",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return{"message:":"Access manager page success"}
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )   
+    return json.dumps(shops) 
+
+@app.get("/manager/shops/{shopID}",tags=["manager"])
+async def shop_details(token:str,shopID:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="manager":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        shop=get_shop_details(shopID)
+        if shop is None:
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid value for shopID",
+            headers={"WWW-Authenticate": "Bearer"},
+            )
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 
+    return json.dumps(get_shop_details(shopID))
+
+@app.post("/manager/shops/{shopID}/executor",tags=["manager"])
+async def update_executor(token:str,shopID:str,executorName:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="manager":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        shop=get_shop_details(shopID)
+        if shop is None:
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid value for shopID",
+            headers={"WWW-Authenticate": "Bearer"},
+            )
+        if shop["channel_id"]!=get_channel_id(payload.get("id")):
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This Shop is not belong to your channel",
+            headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        executor=get_user_db(executorName)
+
+        if executor["role"]!="executor":
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid this email is not executor",
+            headers={"WWW-Authenticate": "Bearer"},
+            )
+        update_executor_db(executorName,shopID)
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )   
+    return {"message":"update success"}
+
 
 @app.post("/admin/new-account/",tags=["admin"])
 async def create_new_account(token:str,email:str,role:str):
