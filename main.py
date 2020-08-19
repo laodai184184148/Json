@@ -61,6 +61,18 @@ def get_user_db(username:str):
         "role":myresult[3]
         }
     return user
+def get_channel(channelID:str):
+    cursor.execute("select * from channel where id='"+channelID+"'")
+    myresult=cursor.fetchone()
+    if myresult is None:
+        return None
+    return{
+            "id": myresult[0],
+            "name": myresult[1],
+            "url": myresult[2],
+            "manager_id":myresult[3],
+
+    }
 
 def get_country_name(country_zip:str):
     cursor.execute("select name from Country where zip_code='"+country_zip+"'")
@@ -407,6 +419,7 @@ async def manager_page(token:str):
             detail="Unauthorized ",
             headers={"WWW-Authenticate": "Bearer"},
         )
+        current_channel=get_channel(get_channel_id(payload.get("id")))
     except (JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -419,7 +432,7 @@ async def manager_page(token:str):
             detail="My sql connection error ",
             headers={"WWW-Authenticate": "Bearer"},
         ) 
-    return{"message:":"Access manager page success"}
+    return{"message:":"Access manager page success"},json.dumps(current_channel)
 
 @app.get("/manager/shops",tags=["manager"])
 async def manager_shops(token:str):
