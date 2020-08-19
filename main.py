@@ -162,7 +162,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -201,7 +201,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
-
 
 async def get_current_user(security_scopes: SecurityScopes, token: str = Depends(oauth2_scheme)):
     if security_scopes.scopes:
@@ -330,7 +329,73 @@ async def executor_page(token:str):
             headers={"WWW-Authenticate": "Bearer"},
         )
     return{"message:":"Access executor page success"}
-    
+
+@app.get("/executor/shops",tags=["executor"])
+async def get_all_shops_executor(token:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="executor":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 
+    return JSONResponse(get_all_shop(payload.get("sub")))
+
+@app.get("/executor/shops/{shopID}",tags=["executor"])
+async def get_all_shops_executor(token:str,shopID:str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        role: str = payload.get("role")
+        if role!="executor":
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        shop=get_shop_details(shopID)
+        if shop is None:
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid value for shopID",
+            headers={"WWW-Authenticate": "Bearer"},
+            )
+        if str(shop["executor_id"])!=str(payload.get("id")):
+            raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="You can not view this shop details ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    except (JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized ",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (mysql.connector.Error):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="My sql connection error ",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 
+    return json.dumps(get_shop_details(shopID))
+
+
 @app.get("/manager/",tags=["manager"])
 async def manager_page(token:str):
     try:
@@ -398,6 +463,12 @@ async def shop_details(token:str,shopID:str):
             raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid value for shopID",
+            headers={"WWW-Authenticate": "Bearer"},
+            )
+        if shop["channel_id"]!=get_channel_id(payload.get("id")):
+            raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This Shop is not belong to your channel",
             headers={"WWW-Authenticate": "Bearer"},
             )
     except (JWTError, ValidationError):
