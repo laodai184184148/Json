@@ -465,7 +465,7 @@ async def shop_details(token:str,shopID:str):
             detail="Invalid value for shopID",
             headers={"WWW-Authenticate": "Bearer"},
             )
-        if shop["channel_id"]!=get_channel_id(payload.get("id")):
+        if str(shop["channel_id"])!=get_channel_id(payload.get("id")):
             raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This Shop is not belong to your channel",
